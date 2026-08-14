@@ -1,0 +1,9 @@
+services:
+  bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      MAX_FILE_SIZE_MB: 2000
+    volumes:
+      - ./downloads:/app/downloads
