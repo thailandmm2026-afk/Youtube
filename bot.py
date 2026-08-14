@@ -32,6 +32,62 @@ os.makedirs(OUTPUT_FOLDER, exist_ok=True)
 CREDIT = "@KMM_MOD1"          # ပြောင်းချင်ရင် ဒီမှာ ပြောင်းပါ
 MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "20000"))  # 2GB
 
+# Cookies for YouTube bot-check bypass
+# Priority: COOKIES_FILE path → cookies.txt in /app → COOKIES_BASE64 env
+COOKIES_FILE = os.environ.get("COOKIES_FILE", "").strip()
+COOKIES_BASE64 = os.environ.get("COOKIES_BASE64", "").strip()
+
+def get_cookies_path() -> str | None:
+    """Return path to a valid cookies.txt, or None."""
+    # 1) Explicit path from env
+    if COOKIES_FILE and os.path.isfile(COOKIES_FILE):
+        return COOKIES_FILE
+    # 2) Default file locations
+    for candidate in ("cookies.txt", "/app/cookies.txt", "/tmp/cookies.txt"):
+        if os.path.isfile(candidate):
+            return candidate
+    # 3) Base64-encoded content from env (Railway-friendly)
+    if COOKIES_BASE64:
+        try:
+            import base64
+            data = base64.b64decode(COOKIES_BASE64)
+            out = "/tmp/cookies.txt"
+            with open(out, "wb") as f:
+                f.write(data)
+            return out
+        except Exception as e:
+            logger.warning(f"Failed to decode COOKIES_BASE64: {e}")
+    return None
+
+def base_ydl_opts() -> dict:
+    """Common yt-dlp options including cookies + anti-bot clients."""
+    opts = {
+        "quiet": True,
+        "no_warnings": True,
+        "noprogress": True,
+        "retries": 10,
+        "fragment_retries": 10,
+        "file_access_retries": 5,
+        "extractor_retries": 5,
+        "socket_timeout": 30,
+        # Prefer mobile / TV clients — often bypasses "Sign in to confirm you're not a bot"
+        "extractor_args": {
+            "youtube": {
+                "player_client": ["android", "ios", "tv", "web"],
+            }
+        },
+    }
+    cookies = get_cookies_path()
+    if cookies:
+        opts["cookiefile"] = cookies
+        logger.info(f"Using cookies: {cookies}")
+    else:
+        logger.warning(
+            "No cookies.txt found. YouTube may block downloads. "
+            "Set COOKIES_BASE64 or add cookies.txt"
+        )
+    return opts
+
 # ──────────────────────────────────────────────
 # Pyrogram Client
 # ──────────────────────────────────────────────
@@ -120,8 +176,7 @@ def extract_yt_url(text: str) -> str | None:
 def get_video_info(url: str) -> dict:
     """Extract title, duration, thumbnail without downloading."""
     ydl_opts = {
-        "quiet": True,
-        "no_warnings": True,
+        **base_ydl_opts(),
         "extract_flat": False,
         "skip_download": True,
     }
@@ -149,16 +204,9 @@ async def download_yt(
     base = os.path.join(OUTPUT_FOLDER, safe_title)
 
     common = {
-        "quiet": True,
-        "no_warnings": True,
-        "noprogress": True,
+        **base_ydl_opts(),
         "concurrent_fragment_downloads": 16,
         "http_chunk_size": 10 * 1024 * 1024,
-        "retries": 10,
-        "fragment_retries": 10,
-        "file_access_retries": 5,
-        "extractor_retries": 5,
-        "socket_timeout": 30,
     }
 
     if choice == "video":
